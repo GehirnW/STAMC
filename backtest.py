@@ -19,6 +19,10 @@ def backtest(start, end, engine_quant, engine_price_vol,
     '''
     Get backtest indictors according to the stock weights
     
+    Attention:
+        1) 退市的股票价格数据不存在，应该加上去
+        2）价格和stk_weight的股票代码不匹配的问题，有可能有stk_weight，但没价格，就很麻烦
+    
     Params:
         start:
             str, like '%Y%m%d'
@@ -43,42 +47,47 @@ def backtest(start, end, engine_quant, engine_price_vol,
     benchmark_rtn = utils.get_benchmark(start, end, engine_quant, benchmark_name)
     stk_weight = utils.get_weight2(start, end, engine_price_vol)
     stk_weight = stk_weight.groupby(level='trade_date').apply(truncate_weights)
-    stk_weight = stk_weight[stk_weight != 0]
+    # stk_weight = stk_weight[stk_weight != 0]
 
-#   price 和 stk_weight的index要完全匹配
-    
-    # Real Trade Date in the period of backtesting
+    # Real Trade Date in the period of backtesting and the date series of turnover 
     td = sorted(list(
                       set(price.index.levels[0].tolist())
                     & set(benchmark_rtn.index.tolist())
                     & set(stk_weight.index.levels[0].tolist())
                     ))
-    turnover_td = td[0: : t] # the date series of turnover 
+    turnover_td = td[0: : t] 
     
     holding = {}
-    weight_pro = stk_weight.loc[td[0]]
-    temp = initial_capital * weight_pro / price.loc[td[0]].reindex(weight_pro.index)
+    df_pro = pd.concat([stk_weight.loc[td[0]], price.loc[td[0]]], axis=1, join='inner')
+    df_pro['weight'] = df_pro['weight'] / df_pro['weight'].sum()
+    weight_pro = df_pro['weight']
+    temp = initial_capital * df_pro['weight'] / df_pro['Close']
     holding[td[0]] = temp
 
     for dt in td[1:]:
         if dt in turnover_td:
             capital = (price.loc[dt].reindex(temp.index) * temp).sum()
-            # cost 需要修改，先用并集合
             cost = Tc * np.abs(stk_weight.loc[dt] 
                              - weight_pro.reindex(stk_weight.loc[dt].index).fillna(0)).sum() / 2
-            weight_pro = stk_weight.loc[dt]
-            temp = (capital - capital * cost) * weight_pro / price.loc[dt].reindex(weight_pro.index)
+            # weight_pro = stk_weight.loc[dt]
+            
+            df_pro = pd.concat([stk_weight.loc[dt], price.loc[dt]], axis=1, join='inner')
+            df_pro['weight'] = df_pro['weight'] / df_pro['weight'].sum()
+            weight_pro = df_pro['weight']
+            temp = (capital - capital * cost) * df_pro['weight'] / df_pro['Close']
+            
         holding[dt] = temp
     holding = pd.concat(holding,names=['trade_date', 'stock_id'])        
     
-    '''
+    
     if price.reindex(holding.index).isnull().values.any():
         # print ('############  price has error #############')
         price = price.reindex(holding.index).groupby(level='code').fillna(method='ffill')
     else:
         price = price.reindex(holding.index)
-    '''
-    portfolio_rtn = (holding * price).groupby(level='date').sum().pct_change().fillna(0)
+    
+    portfolio_rtn = (holding * price).groupby(level='trade_date').sum().pct_change().fillna(0)
+    benchmark_rtn = benchmark_rtn.reindex(portfolio_rtn.index).fillna(0)
     
     stat = get_stat(portfolio_rtn, benchmark_rtn)
     return stat
@@ -205,7 +214,7 @@ if __name__ == "__main__":
     engine_price_vol = create_engine(r'mysql+pyodbc://price_vol')
     
     start = '20100101'
-    end = '20101231'
+    end = '20110630'
     
     stat = backtest(start, end, engine_quant, engine_price_vol)
     

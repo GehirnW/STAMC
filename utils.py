@@ -683,6 +683,7 @@ def get_weight(date, tdays, engine, timelong=0):
     else:
         return data.set_index(['trade_date', 'stock_id'])['weight']
 
+
 @timer    
 def get_weight2(start, end, engine):
     '''
@@ -831,7 +832,7 @@ def get_benchmark(start, end, engine, benchmark):
     data = (pd.read_sql(q.get_sql(), engine)
               .rename(columns = {'pctchg': 'idx_rtn'})
               .assign(idx_rtn = lambda df: df['idx_rtn'] / 100,
-                      date = lambda df: pd.to_datetime(df['trade_date']))
+                      trade_date = lambda df: pd.to_datetime(df['trade_date']))
               .set_index('trade_date'))
     return data['idx_rtn']
 
